@@ -1,33 +1,63 @@
 
 from flask import Flask, jsonify
-import time
-import random
+import requests
+from datetime import datetime
 
 app = Flask(__name__)
 
+# PUT YOUR FOOTBALL-DATA.ORG API KEY HERE
+API_KEY = "28bd1150cc9446e49039c5718678b10f"
+
 @app.route('/api/tips')
 def get_tips():
-    # A larger pool of matches that the server can pick from
-    pool = [
-        {"home": "Real Madrid", "away": "Barcelona", "odds": 1.85, "confidence": "65%", "banker": "Over 2.5 Goals"},
-        {"home": "Man City", "away": "Arsenal", "odds": 1.50, "confidence": "75%", "banker": "Man City Win"},
-        {"home": "Bayern Munich", "away": "Dortmund", "odds": 1.40, "confidence": "80%", "banker": "Bayern Win"},
-        {"home": "Juventus", "away": "AC Milan", "odds": 2.10, "confidence": "55%", "banker": "Both Teams Score"},
-        {"home": "Chelsea", "away": "Liverpool", "odds": 1.65, "confidence": "70%", "banker": "Liverpool Win"},
-        {"home": "PSG", "away": "Marseille", "odds": 1.30, "confidence": "88%", "banker": "PSG Win"},
-        {"home": "Atletico Madrid", "away": "Sevilla", "odds": 1.45, "confidence": "78%", "banker": "Atletico Win"}
-    ]
-    
-    # Randomly pick 3 matches from the pool
-    daily_tips = random.sample(pool, 3)
+    try:
+        # Fetch Premier League matches
+        url = "https://api.football-data.org/v4/competitions/PL/matches?status=SCHEDULED"
+        headers = { 'X-Auth-Token': API_KEY }
+        
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        
+        matches = data.get('matches', [])
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        
+        tips = []
+        
+        # Filter for today's matches
+        for match in matches:
+            match_date = match['utcDate'].split('T')[0]
+            
+            if match_date == today and len(tips) < 3:
+                home = match['homeTeam']['name']
+                away = match['awayTeam']['name']
+                
+                tips.append({
+                    "home": home,
+                    "away": away,
+                    "odds": 1.40,
+                    "confidence": "85%",
+                    "banker": f"{home} Win"
+                })
+                
+        if not tips:
+            tips.append({
+                "home": "No matches today",
+                "away": "Check back tomorrow",
+                "odds": 0.0,
+                "confidence": "0%",
+                "banker": "None"
+            })
 
-    data = {
-        "date": time.strftime("%Y-%m-%d"),
-        "bankroll": 1500,
-        "suggested_stake": 75,
-        "tips": daily_tips
-    }
-    return jsonify(data)
+        result = {
+            "date": today,
+            "bankroll": 1500,
+            "suggested_stake": 75,
+            "tips": tips
+        }
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
