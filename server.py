@@ -13,10 +13,14 @@ DB_FILE = "bankroll.db"
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
+    # Vault Table
     c.execute('''CREATE TABLE IF NOT EXISTS vault (id INTEGER PRIMARY KEY, balance REAL)''')
     c.execute('SELECT COUNT(*) FROM vault')
     if c.fetchone()[0] == 0:
         c.execute('INSERT INTO vault (id, balance) VALUES (1, 1500.0)')
+    
+    # Cache Table (To store matches so we don't spam the API)
+    c.execute('''CREATE TABLE IF NOT EXISTS cache (date TEXT PRIMARY KEY, data TEXT)''')
     conn.commit()
     conn.close()
 
@@ -40,16 +44,13 @@ def update_balance(amount):
 def calculate_poisson_probability(home_goals_avg, away_goals_avg):
     exp_home = home_goals_avg * 1.2
     exp_away = away_goals_avg * 0.9
-    
     def poisson(k, lam):
         return (lam**k * math.exp(-lam)) / math.factorial(k)
-    
     prob_home_win = 0
     for i in range(6):
         for j in range(6):
             prob = poisson(i, exp_home) * poisson(j, exp_away)
             if i > j: prob_home_win += prob
-            
     return prob_home_win
 
 def calculate_kelly(balance, odds, prob):
@@ -68,6 +69,19 @@ def get_tips():
         today = datetime.utcnow().strftime('%Y-%m-%d')
         current_balance = get_balance()
         
+        # 1. Check the Cache first
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute('SELECT data FROM cache WHERE date=?', (today,))
+        row = c.fetchone()
+        
+        if row:
+            # If we have cached data for today, serve it immediately
+            conn.close()
+            cached_tips = row[0]
+            return jsonify({"date": today, "bankroll": current_balance, "tips": eval(cached_tips)})
+            
+        # 2. If no cache, fetch from API
         url = f"https://v3.football.api-sports.io/fixtures?date={today}"
         headers = { 'x-apisports-key': API_KEY }
         
@@ -75,66 +89,52 @@ def get_tips():
         data = response.json()
         
         if 'errors' in data and data['errors']:
+            conn.close()
             return jsonify({"error": data['errors']}), 500
             
         matches = data.get('response', [])
         tips = []
         
-        # Only scan the first 4 matches to save API requests
-        for match in matches[:4]:
+        for match in matches[:5]: # Check only the first 5 to save API limits
             home_id = match['teams']['home']['id']
             away_id = match['teams']['away']['id']
-            home_name = match['teams']['home']['name']
-            away_name = match['teams']['away']['name']
-            league = match['league']['name']
             
-            # Get last 5 matches for Home team
+            # Get stats
             url_home = f"https://v3.football.api-sports.io/fixtures?team={home_id}&last=5"
             res_home = requests.get(url_home, headers=headers).json()
-            home_goals = 0
-            for m in res_home.get('response', []):
-                if m['goals']['home'] is not None:
-                    home_goals += m['goals']['home'] if m['teams']['home']['id'] == home_id else m['goals']['away']
+            home_goals = sum([m['goals']['home'] if m['teams']['home']['id'] == home_id else m['goals']['away'] for m in res_home.get('response', []) if m['goals']['home'] is not None])
             
-            # Get last 5 matches for Away team
             url_away = f"https://v3.football.api-sports.io/fixtures?team={away_id}&last=5"
             res_away = requests.get(url_away, headers=headers).json()
-            away_goals = 0
-            for m in res_away.get('response', []):
-                if m['goals']['home'] is not None:
-                    away_goals += m['goals']['away'] if m['teams']['away']['id'] == away_id else m['goals']['home']
+            away_goals = sum([m['goals']['away'] if m['teams']['away']['id'] == away_id else m['goals']['home'] for m in res_away.get('response', []) if m['goals']['home'] is not None])
             
-            # Average goals
             home_avg = home_goals / 5 if home_goals > 0 else 1.0
             away_avg = away_goals / 5 if away_goals > 0 else 1.0
             
-            # Calculate probabilities using Poisson
             p_home = calculate_poisson_probability(home_avg, away_avg)
             
-            # Only bet if Home team > 40% chance
             if p_home > 0.40:
                 simulated_odds = 2.50
                 kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
-                
                 tips.append({
-                    "home": home_name,
-                    "away": away_name,
-                    "league": league,
+                    "home": match['teams']['home']['name'],
+                    "away": match['teams']['away']['name'],
+                    "league": match['league']['name'],
                     "odds": simulated_odds,
                     "confidence": f"{int(p_home*100)}%",
-                    "banker": f"{home_name} Win",
+                    "banker": f"{match['teams']['home']['name']} Win",
                     "stake": kelly_stake
                 })
                 
         if not tips:
-            tips.append({"home": "No Value Bets", "away": "Model found no edge", "league": "Poisson Math", "odds": 0.0, "confidence": "0%", "banker": "None", "stake": 0.0})
+            tips.append({"home": "No Value Bets", "away": "Check back later", "league": "None", "odds": 0.0, "confidence": "0%", "banker": "None", "stake": 0.0})
 
-        result = {
-            "date": today,
-            "bankroll": current_balance,
-            "tips": tips
-        }
-        return jsonify(result)
+        # 3. Save to Cache before returning
+        c.execute('INSERT OR REPLACE INTO cache (date, data) VALUES (?, ?)', (today, str(tips)))
+        conn.commit()
+        conn.close()
+
+        return jsonify({"date": today, "bankroll": current_balance, "tips": tips})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
