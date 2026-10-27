@@ -6,7 +6,7 @@ from datetime import datetime
 app = Flask(__name__)
 
 # PUT YOUR API KEY HERE
-API_KEY = "YOUR_API_KEY_HERE"
+API_KEY = "e7d3332814a2b188fc6788f2ee35d2f2"
 DB_FILE = "bankroll.db"
 
 def init_db():
@@ -38,21 +38,18 @@ def update_balance(amount):
     conn.close()
 
 def calculate_kelly(balance, odds, prob):
-    # Kelly Formula: f* = ( (b * p) - q ) / b
-    # where b = odds - 1, p = probability, q = 1 - p
     b = odds - 1
     p = prob
     q = 1 - p
     
     kelly_fraction = ((b * p) - q) / b
     
-    # We use "Fractional Kelly" (dividing by 4) to reduce volatility
-    # and never bet more than 5% of the bankroll
+    # Fractional Kelly (dividing by 4) capped at 5% of bankroll
     fraction = kelly_fraction / 4 
     if fraction > 0.05: 
         fraction = 0.05
     if fraction < 0:
-        fraction = 0 # Don't bet if edge is negative
+        fraction = 0 
         
     return round(balance * fraction, 2)
 
@@ -62,7 +59,8 @@ def get_tips():
         today = datetime.utcnow().strftime('%Y-%m-%d')
         current_balance = get_balance()
         
-        url = f"https://v3.football.api-sports.io/fixtures?date={today}"
+        # Changed to fetch the next 10 upcoming fixtures globally
+        url = f"https://v3.football.api-sports.io/fixtures?next=10"
         headers = { 'x-apisports-key': API_KEY }
         
         response = requests.get(url, headers=headers)
@@ -80,13 +78,9 @@ def get_tips():
                 home = match['teams']['home']['name']
                 away = match['teams']['away']['name']
                 
-                # Simulated Odds and Probability (Since free API lacks odds)
-                # We pretend the bookie gives 1.50 odds (66% implied)
-                # We pretend our model calculates a 75% chance of winning
                 simulated_odds = 1.50
                 simulated_prob = 0.75 
                 
-                # Calculate the optimal stake using Kelly Criterion
                 kelly_stake = calculate_kelly(current_balance, simulated_odds, simulated_prob)
                 
                 tips.append({
