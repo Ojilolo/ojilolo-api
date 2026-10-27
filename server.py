@@ -58,8 +58,8 @@ def calculate_kelly(balance, odds, prob):
     p = prob
     q = 1 - p
     kelly_fraction = ((b * p) - q) / b
-    fraction = kelly_fraction / 4 
-    if fraction > 0.05: fraction = 0.05
+    fraction = kelly_fraction / 4 # Fractional Kelly
+    if fraction > 0.05: fraction = 0.05 # Cap at 5%
     if fraction < 0: fraction = 0 
     return round(balance * fraction, 2)
 
@@ -82,8 +82,11 @@ def get_tips():
         matches = data.get('response', [])
         tips = []
         
-        # ONLY loop through the first 4 matches to prevent rate-limiting
-        for match in matches[:4]:
+        # Scan the first 10 matches to find value
+        for match in matches[:10]:
+            if len(tips) >= 3:
+                break
+                
             home_id = match['teams']['home']['id']
             away_id = match['teams']['away']['id']
             home_name = match['teams']['home']['name']
@@ -113,9 +116,9 @@ def get_tips():
             # Calculate probabilities using Poisson
             p_home = calculate_poisson_probability(home_avg, away_avg)
             
-            # We only bet if the Home team has a > 60% chance of winning
-            if p_home > 0.60:
-                simulated_odds = 1.50
+            # We only bet if the Home team has a > 40% chance of winning
+            if p_home > 0.40:
+                simulated_odds = 2.50
                 kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
                 
                 tips.append({
