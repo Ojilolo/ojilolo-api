@@ -55,17 +55,16 @@ def calculate_kelly(balance, odds, prob):
 @app.route('/api/tips')
 def get_tips():
     try:
-        today = datetime.utcnow().strftime('%Y-%m-%d')
+        # HARDCODED SATURDAY FOR TESTING
+        today = "2026-10-24" 
         current_balance = get_balance()
         
-        # Fetch the next 10 upcoming fixtures globally
-        url = f"https://v3.football.api-sports.io/fixtures?next=10"
+        url = f"https://v3.football.api-sports.io/fixtures?date={today}"
         headers = { 'x-apisports-key': API_KEY }
         
         response = requests.get(url, headers=headers)
         data = response.json()
         
-        # DEBUG: If the API returns errors, send them to the app
         if 'errors' in data and data['errors']:
             return jsonify({"error": data['errors']}), 500
             
