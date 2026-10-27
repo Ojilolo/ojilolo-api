@@ -41,7 +41,6 @@ def calculate_kelly(balance, odds, prob):
     b = odds - 1
     p = prob
     q = 1 - p
-    
     kelly_fraction = ((b * p) - q) / b
     fraction = kelly_fraction / 4 
     if fraction > 0.05: 
@@ -53,8 +52,8 @@ def calculate_kelly(balance, odds, prob):
 @app.route('/api/tips')
 def get_tips():
     try:
-        # HARDCODED TOMORROW (Valid for free tier)
-        today = "2026-10-28" 
+        # Set back to today
+        today = datetime.utcnow().strftime('%Y-%m-%d')
         current_balance = get_balance()
         
         url = f"https://v3.football.api-sports.io/fixtures?date={today}"
@@ -69,29 +68,29 @@ def get_tips():
         matches = data.get('response', [])
         tips = []
         
-        wanted_leagues = [78, 61, 71, 169, 39, 140, 135, 2, 3]
-        
+        # NO LEAGUE FILTER - Grab matches from anywhere in the world
         for match in matches:
             if len(tips) >= 3:
                 break
-            if match['league']['id'] in wanted_leagues:
-                home = match['teams']['home']['name']
-                away = match['teams']['away']['name']
                 
-                simulated_odds = 1.50
-                simulated_prob = 0.75 
-                
-                kelly_stake = calculate_kelly(current_balance, simulated_odds, simulated_prob)
-                
-                tips.append({
-                    "home": home,
-                    "away": away,
-                    "league": match['league']['name'],
-                    "odds": simulated_odds,
-                    "confidence": f"{int(simulated_prob*100)}%",
-                    "banker": f"{home} Win",
-                    "stake": kelly_stake
-                })
+            home = match['teams']['home']['name']
+            away = match['teams']['away']['name']
+            league = match['league']['name']
+            
+            simulated_odds = 1.50
+            simulated_prob = 0.75 
+            
+            kelly_stake = calculate_kelly(current_balance, simulated_odds, simulated_prob)
+            
+            tips.append({
+                "home": home,
+                "away": away,
+                "league": league,
+                "odds": simulated_odds,
+                "confidence": f"{int(simulated_prob*100)}%",
+                "banker": f"{home} Win",
+                "stake": kelly_stake
+            })
                 
         if not tips:
             tips.append({"home": "No matches today", "away": "Check back later", "league": "None", "odds": 0.0, "confidence": "0%", "banker": "None", "stake": 0.0})
