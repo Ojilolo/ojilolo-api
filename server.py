@@ -1,5 +1,6 @@
 from flask import Flask, jsonify
 import requests
+import time
 from datetime import datetime
 
 app = Flask(__name__)
@@ -7,8 +8,8 @@ app = Flask(__name__)
 # PUT YOUR FOOTBALL-DATA.ORG API KEY HERE
 API_KEY = "YOUR_API_KEY_HERE"
 
-# The leagues we want to scan
-LEAGUES = ["PL", "BL1", "FL1", "BSA", "CSL", "SA", "PD", "ISL"]
+# Only the top 5 European leagues to avoid hitting the rate limit
+LEAGUES = ["PL", "BL1", "FL1", "SA", "PD"]
 
 @app.route('/api/tips')
 def get_tips():
@@ -17,23 +18,21 @@ def get_tips():
         headers = { 'X-Auth-Token': API_KEY }
         today = datetime.utcnow().strftime('%Y-%m-%d')
 
-        # Loop through each league
         for league in LEAGUES:
-            # Stop if we already have 3 good tips
             if len(tips) >= 3:
                 break
                 
             url = f"https://api.football-data.org/v4/competitions/{league}/matches?status=SCHEDULED"
             response = requests.get(url, headers=headers)
             
-            # If the API blocks this league (free tier limits), skip to the next one
             if response.status_code != 200:
+                # Wait 6 seconds before trying the next league to avoid rate limits
+                time.sleep(6) 
                 continue
                 
             data = response.json()
             matches = data.get('matches', [])
             
-            # Look through matches to find one to add
             for match in matches:
                 if len(tips) >= 3:
                     break
