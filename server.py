@@ -64,22 +64,6 @@ def calculate_kelly(balance, odds, prob):
 
 @app.route('/api/tips')
 def get_tips():
-    # TEMPORARY MOCK DATA BECAUSE API IS SUSPENDED
-    return jsonify({
-        "date": "2026-10-27",
-        "bankroll": get_balance(),
-        "tips": [
-            {
-                "home": "Real Madrid", "away": "Barcelona", "league": "La Liga",
-                "odds": 1.50, "confidence": "75%", "banker": "Real Madrid Win", "stake": 75.0
-            },
-            {
-                "home": "Man City", "away": "Arsenal", "league": "Premier League",
-                "odds": 1.65, "confidence": "70%", "banker": "Man City Win", "stake": 50.0
-            }
-        ]
-    })
-
     try:
         today = datetime.utcnow().strftime('%Y-%m-%d')
         current_balance = get_balance()
@@ -96,6 +80,7 @@ def get_tips():
         matches = data.get('response', [])
         tips = []
         
+        # Only scan the first 4 matches to save API requests
         for match in matches[:4]:
             home_id = match['teams']['home']['id']
             away_id = match['teams']['away']['id']
@@ -103,6 +88,7 @@ def get_tips():
             away_name = match['teams']['away']['name']
             league = match['league']['name']
             
+            # Get last 5 matches for Home team
             url_home = f"https://v3.football.api-sports.io/fixtures?team={home_id}&last=5"
             res_home = requests.get(url_home, headers=headers).json()
             home_goals = 0
@@ -110,6 +96,7 @@ def get_tips():
                 if m['goals']['home'] is not None:
                     home_goals += m['goals']['home'] if m['teams']['home']['id'] == home_id else m['goals']['away']
             
+            # Get last 5 matches for Away team
             url_away = f"https://v3.football.api-sports.io/fixtures?team={away_id}&last=5"
             res_away = requests.get(url_away, headers=headers).json()
             away_goals = 0
@@ -117,11 +104,14 @@ def get_tips():
                 if m['goals']['home'] is not None:
                     away_goals += m['goals']['away'] if m['teams']['away']['id'] == away_id else m['goals']['home']
             
+            # Average goals
             home_avg = home_goals / 5 if home_goals > 0 else 1.0
             away_avg = away_goals / 5 if away_goals > 0 else 1.0
             
+            # Calculate probabilities using Poisson
             p_home = calculate_poisson_probability(home_avg, away_avg)
             
+            # Only bet if Home team > 40% chance
             if p_home > 0.40:
                 simulated_odds = 2.50
                 kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
