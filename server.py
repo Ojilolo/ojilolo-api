@@ -43,20 +43,18 @@ def calculate_kelly(balance, odds, prob):
     q = 1 - p
     
     kelly_fraction = ((b * p) - q) / b
-    
     fraction = kelly_fraction / 4 
     if fraction > 0.05: 
         fraction = 0.05
     if fraction < 0:
         fraction = 0 
-        
     return round(balance * fraction, 2)
 
 @app.route('/api/tips')
 def get_tips():
     try:
-        # HARDCODED SATURDAY FOR TESTING
-        today = "2026-10-24" 
+        # HARDCODED TOMORROW (Valid for free tier)
+        today = "2026-10-28" 
         current_balance = get_balance()
         
         url = f"https://v3.football.api-sports.io/fixtures?date={today}"
