@@ -5,7 +5,7 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-# PUT YOUR API KEY HERE
+# PUT YOUR API KEY HERE (Keep the quotes)
 API_KEY = "e7d3332814a2b188fc6788f2ee35d2f2"
 DB_FILE = "bankroll.db"
 
@@ -44,7 +44,6 @@ def calculate_kelly(balance, odds, prob):
     
     kelly_fraction = ((b * p) - q) / b
     
-    # Fractional Kelly (dividing by 4) capped at 5% of bankroll
     fraction = kelly_fraction / 4 
     if fraction > 0.05: 
         fraction = 0.05
@@ -59,13 +58,17 @@ def get_tips():
         today = datetime.utcnow().strftime('%Y-%m-%d')
         current_balance = get_balance()
         
-        # Changed to fetch the next 10 upcoming fixtures globally
+        # Fetch the next 10 upcoming fixtures globally
         url = f"https://v3.football.api-sports.io/fixtures?next=10"
         headers = { 'x-apisports-key': API_KEY }
         
         response = requests.get(url, headers=headers)
         data = response.json()
         
+        # DEBUG: If the API returns errors, send them to the app
+        if 'errors' in data and data['errors']:
+            return jsonify({"error": data['errors']}), 500
+            
         matches = data.get('response', [])
         tips = []
         
