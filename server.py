@@ -38,34 +38,20 @@ def update_balance(amount):
     conn.close()
 
 def calculate_poisson_probability(home_goals_avg, away_goals_avg):
-    # Simulates probability of Home Win, Draw, Away Win
-    # This is a simplified Poisson model
-    home_attack = home_goals_avg
-    away_defense = away_goals_avg
-    away_attack = away_goals_avg
-    home_defense = home_goals_avg
+    # Simplified Poisson Model
+    exp_home = home_goals_avg * 1.2 # Home advantage
+    exp_away = away_goals_avg * 0.9
     
-    # Expected goals
-    exp_home = home_attack * away_defense * 1.2 # 1.2 is home advantage
-    exp_away = away_attack * home_defense * 0.9
-    
-    # Poisson formula: P(k; λ) = (λ^k * e^-λ) / k!
     def poisson(k, lam):
         return (lam**k * math.exp(-lam)) / math.factorial(k)
     
     prob_home_win = 0
-    prob_draw = 0
-    prob_away_win = 0
-    
-    # Calculate probabilities for 0 to 5 goals
     for i in range(6):
         for j in range(6):
             prob = poisson(i, exp_home) * poisson(j, exp_away)
             if i > j: prob_home_win += prob
-            elif i == j: prob_draw += prob
-            else: prob_away_win += prob
             
-    return prob_home_win, prob_draw, prob_away_win
+    return prob_home_win
 
 def calculate_kelly(balance, odds, prob):
     b = odds - 1
@@ -96,11 +82,8 @@ def get_tips():
         matches = data.get('response', [])
         tips = []
         
-        # We will use the first 3 matches that have stats
-        for match in matches:
-            if len(tips) >= 3:
-                break
-                
+        # ONLY loop through the first 4 matches to prevent rate-limiting
+        for match in matches[:4]:
             home_id = match['teams']['home']['id']
             away_id = match['teams']['away']['id']
             home_name = match['teams']['home']['name']
@@ -110,39 +93,43 @@ def get_tips():
             # Get last 5 matches for Home team
             url_home = f"https://v3.football.api-sports.io/fixtures?team={home_id}&last=5"
             res_home = requests.get(url_home, headers=headers).json()
-            home_goals = sum([m['goals']['home'] if m['teams']['home']['id'] == home_id else m['goals']['away'] for m in res_home.get('response', []) if m['goals']['home'] is not None])
+            home_goals = 0
+            for m in res_home.get('response', []):
+                if m['goals']['home'] is not None:
+                    home_goals += m['goals']['home'] if m['teams']['home']['id'] == home_id else m['goals']['away']
             
             # Get last 5 matches for Away team
             url_away = f"https://v3.football.api-sports.io/fixtures?team={away_id}&last=5"
             res_away = requests.get(url_away, headers=headers).json()
-            away_goals = sum([m['goals']['away'] if m['teams']['away']['id'] == away_id else m['goals']['home'] for m in res_away.get('response', []) if m['goals']['home'] is not None])
+            away_goals = 0
+            for m in res_away.get('response', []):
+                if m['goals']['home'] is not None:
+                    away_goals += m['goals']['away'] if m['teams']['away']['id'] == away_id else m['goals']['home']
             
             # Average goals
             home_avg = home_goals / 5 if home_goals > 0 else 1.0
             away_avg = away_goals / 5 if away_goals > 0 else 1.0
             
-            # Calculate probabilities
-            p_home, p_draw, p_away = calculate_poisson_probability(home_avg, away_avg)
+            # Calculate probabilities using Poisson
+            p_home = calculate_poisson_probability(home_avg, away_avg)
             
-            # We only bet if the Home team has a > 50% chance of winning
-            if p_home > 0.50:
-                simulated_odds = 1.50 # Assume bookie gives 1.50
-                # If our math says probability is higher than implied by odds (1/1.5 = 66%), we have an edge
-                if p_home > 0.66:
-                    kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
-                    
-                    tips.append({
-                        "home": home_name,
-                        "away": away_name,
-                        "league": league,
-                        "odds": simulated_odds,
-                        "confidence": f"{int(p_home*100)}%",
-                        "banker": f"{home_name} Win",
-                        "stake": kelly_stake
-                    })
+            # We only bet if the Home team has a > 60% chance of winning
+            if p_home > 0.60:
+                simulated_odds = 1.50
+                kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
+                
+                tips.append({
+                    "home": home_name,
+                    "away": away_name,
+                    "league": league,
+                    "odds": simulated_odds,
+                    "confidence": f"{int(p_home*100)}%",
+                    "banker": f"{home_name} Win",
+                    "stake": kelly_stake
+                })
                 
         if not tips:
-            tips.append({"home": "No Value Bets", "away": "Check back later", "league": "None", "odds": 0.0, "confidence": "0%", "banker": "None", "stake": 0.0})
+            tips.append({"home": "No Value Bets", "away": "Model found no edge", "league": "Poisson Math", "odds": 0.0, "confidence": "0%", "banker": "None", "stake": 0.0})
 
         result = {
             "date": today,
