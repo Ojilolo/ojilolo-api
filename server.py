@@ -2,24 +2,24 @@ from flask import Flask, jsonify, request
 import requests
 import sqlite3
 import math
+import json
 from datetime import datetime
 
 app = Flask(__name__)
 
-# PUT YOUR API KEY HERE
-API_KEY = "e7d3332814a2b188fc6788f2ee35d2f2"
+# PUT YOUR NEW API KEY HERE
+API_KEY = "ccb61a1bdbf95a7618e78bac1de25032"
 DB_FILE = "bankroll.db"
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    # Vault Table
     c.execute('''CREATE TABLE IF NOT EXISTS vault (id INTEGER PRIMARY KEY, balance REAL)''')
     c.execute('SELECT COUNT(*) FROM vault')
     if c.fetchone()[0] == 0:
         c.execute('INSERT INTO vault (id, balance) VALUES (1, 1500.0)')
     
-    # Cache Table (To store matches so we don't spam the API)
+    # Create the cache table if it doesn't exist
     c.execute('''CREATE TABLE IF NOT EXISTS cache (date TEXT PRIMARY KEY, data TEXT)''')
     conn.commit()
     conn.close()
@@ -69,19 +69,19 @@ def get_tips():
         today = datetime.utcnow().strftime('%Y-%m-%d')
         current_balance = get_balance()
         
-        # 1. Check the Cache first
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
+        
+        # 1. Check the Cache
         c.execute('SELECT data FROM cache WHERE date=?', (today,))
         row = c.fetchone()
         
         if row:
-            # If we have cached data for today, serve it immediately
             conn.close()
-            cached_tips = row[0]
-            return jsonify({"date": today, "bankroll": current_balance, "tips": eval(cached_tips)})
+            cached_tips = json.loads(row[0])
+            return jsonify({"date": today, "bankroll": current_balance, "tips": cached_tips})
             
-        # 2. If no cache, fetch from API
+        # 2. Fetch from API if not cached
         url = f"https://v3.football.api-sports.io/fixtures?date={today}"
         headers = { 'x-apisports-key': API_KEY }
         
@@ -95,15 +95,23 @@ def get_tips():
         matches = data.get('response', [])
         tips = []
         
-        for match in matches[:5]: # Check only the first 5 to save API limits
+        # Scan the first 10 matches to find value
+        for match in matches[:10]:
+            if len(tips) >= 3:
+                break
+                
             home_id = match['teams']['home']['id']
             away_id = match['teams']['away']['id']
+            home_name = match['teams']['home']['name']
+            away_name = match['teams']['away']['name']
+            league = match['league']['name']
             
-            # Get stats
+            # Get last 5 matches for Home team
             url_home = f"https://v3.football.api-sports.io/fixtures?team={home_id}&last=5"
             res_home = requests.get(url_home, headers=headers).json()
             home_goals = sum([m['goals']['home'] if m['teams']['home']['id'] == home_id else m['goals']['away'] for m in res_home.get('response', []) if m['goals']['home'] is not None])
             
+            # Get last 5 matches for Away team
             url_away = f"https://v3.football.api-sports.io/fixtures?team={away_id}&last=5"
             res_away = requests.get(url_away, headers=headers).json()
             away_goals = sum([m['goals']['away'] if m['teams']['away']['id'] == away_id else m['goals']['home'] for m in res_away.get('response', []) if m['goals']['home'] is not None])
@@ -116,21 +124,22 @@ def get_tips():
             if p_home > 0.40:
                 simulated_odds = 2.50
                 kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
+                
                 tips.append({
-                    "home": match['teams']['home']['name'],
-                    "away": match['teams']['away']['name'],
-                    "league": match['league']['name'],
+                    "home": home_name,
+                    "away": away_name,
+                    "league": league,
                     "odds": simulated_odds,
                     "confidence": f"{int(p_home*100)}%",
-                    "banker": f"{match['teams']['home']['name']} Win",
+                    "banker": f"{home_name} Win",
                     "stake": kelly_stake
                 })
                 
         if not tips:
-            tips.append({"home": "No Value Bets", "away": "Check back later", "league": "None", "odds": 0.0, "confidence": "0%", "banker": "None", "stake": 0.0})
+            tips.append({"home": "No Value Bets", "away": "Model found no edge", "league": "Poisson Math", "odds": 0.0, "confidence": "0%", "banker": "None", "stake": 0.0})
 
-        # 3. Save to Cache before returning
-        c.execute('INSERT OR REPLACE INTO cache (date, data) VALUES (?, ?)', (today, str(tips)))
+        # 3. Save to Cache
+        c.execute('INSERT OR REPLACE INTO cache (date, data) VALUES (?, ?)', (today, json.dumps(tips)))
         conn.commit()
         conn.close()
 
