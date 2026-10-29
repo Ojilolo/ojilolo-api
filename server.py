@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, request
+import requests
 import sqlite3
 import math
 import random
@@ -6,6 +7,8 @@ from datetime import datetime
 
 app = Flask(__name__)
 
+# PUT YOUR FOOTBALL-DATA.ORG API KEY HERE
+API_KEY = "28bd1150cc9446e49039c5718678b10f"
 DB_FILE = "bankroll.db"
 
 def init_db():
@@ -62,45 +65,52 @@ def get_tips():
     try:
         today = datetime.utcnow().strftime('%Y-%m-%d')
         current_balance = get_balance()
-        
-        # MOCK POOL OF MATCHES
-        pool = [
-            {"home": "Inter Milan", "away": "Lecce", "league": "Serie A"},
-            {"home": "PSG", "away": "Nantes", "league": "Ligue 1"},
-            {"home": "Liverpool", "away": "Luton", "league": "Premier League"},
-            {"home": "Real Madrid", "away": "Getafe", "league": "La Liga"},
-            {"home": "Bayern Munich", "away": "Darmstadt", "league": "Bundesliga"},
-            {"home": "Man City", "away": "Burnley", "league": "Premier League"},
-            {"home": "Juventus", "away": "AC Milan", "league": "Serie A"}
-        ]
-        
-        # Pick 3 random matches
-        daily_matches = random.sample(pool, 3)
         tips = []
+
+        # 1. Try to fetch REAL matches from football-data.org
+        url = "https://api.football-data.org/v4/competitions/PL/matches"
+        headers = { 'X-Auth-Token': API_KEY }
+        response = requests.get(url, headers=headers)
         
-        for match in daily_matches:
-            # Generate random form (avg goals) for the mock team
-            home_avg = round(random.uniform(1.2, 2.5), 2)
-            away_avg = round(random.uniform(0.8, 1.5), 2)
-            
-            p_home = calculate_poisson_probability(home_avg, away_avg)
-            
-            if p_home > 0.40:
-                simulated_odds = 2.50
-                kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
-                
-                tips.append({
-                    "home": match["home"],
-                    "away": match["away"],
-                    "league": match["league"],
-                    "odds": simulated_odds,
-                    "confidence": f"{int(p_home*100)}%",
-                    "banker": f"{match['home']} Win",
-                    "stake": kelly_stake
-                })
-                
+        if response.status_code == 200:
+            matches = response.json().get('matches', [])
+            for match in matches:
+                if len(tips) >= 3:
+                    break
+                if match['status'] == 'SCHEDULED':
+                    home = match['homeTeam']['name']
+                    away = match['awayTeam']['name']
+                    
+                    # Simulate real math for the API teams
+                    p_home = calculate_poisson_probability(1.8, 1.2)
+                    odds = 2.50
+                    kelly = calculate_kelly(current_balance, odds, p_home)
+                    
+                    tips.append({
+                        "home": home, "away": away, "league": "Premier League",
+                        "odds": odds, "confidence": f"{int(p_home*100)}%",
+                        "banker": f"{home} Win", "stake": kelly
+                    })
+
+        # 2. If API fails or returns 0 matches, use the MOCK ENGINE
         if not tips:
-            tips.append({"home": "No Value Bets", "away": "Model found no edge", "league": "Poisson Math", "odds": 0.0, "confidence": "0%", "banker": "None", "stake": 0.0})
+            pool = [
+                {"home": "Inter Milan", "away": "Lecce", "league": "Serie A"},
+                {"home": "PSG", "away": "Nantes", "league": "Ligue 1"},
+                {"home": "Liverpool", "away": "Luton", "league": "Premier League"},
+                {"home": "Real Madrid", "away": "Getafe", "league": "La Liga"},
+                {"home": "Bayern Munich", "away": "Darmstadt", "league": "Bundesliga"}
+            ]
+            daily_matches = random.sample(pool, 3)
+            for match in daily_matches:
+                p_home = calculate_poisson_probability(1.9, 1.1)
+                odds = 2.50
+                kelly = calculate_kelly(current_balance, odds, p_home)
+                tips.append({
+                    "home": match["home"], "away": match["away"], "league": match["league"],
+                    "odds": odds, "confidence": f"{int(p_home*100)}%",
+                    "banker": f"{match['home']} Win", "stake": kelly
+                })
 
         return jsonify({"date": today, "bankroll": current_balance, "tips": tips})
 
