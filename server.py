@@ -3,6 +3,8 @@ import requests
 import sqlite3
 import math
 import random
+import re
+import xml.etree.ElementTree as ET
 from datetime import datetime
 
 app = Flask(__name__)
@@ -64,44 +66,50 @@ def get_tips():
     current_balance = get_balance()
     tips = []
     
-    # 1. Try TheSportsDB (Next 15 Premier League matches)
+    # 1. Scrape BBC Sport RSS Feed for real upcoming matches
     try:
-        # 4328 = English Premier League ID on TheSportsDB
-        url = "https://www.thesportsdb.com/api/v1/json/3/eventsnextleague.php?id=4328"
-        response = requests.get(url, timeout=10)
-        data = response.json() 
+        rss_url = "https://feeds.bbci.co.uk/sport/football/rss.xml"
+        response = requests.get(rss_url, timeout=10)
         
-        events = data.get('events')
-        if events:
-            random.shuffle(events)
-            for match in events:
-                if len(tips) >= 3:
-                    break
+        # Parse the XML
+        root = ET.fromstring(response.content)
+        
+        # Loop through the news items
+        for item in root.findall('.//item'):
+            if len(tips) >= 3:
+                break
+                
+            title = item.find('title').text
+            
+            # Look for titles like "Team A v Team B" or "Team A vs Team B"
+            match = re.search(r'(.+?) v (.+?)(?::|$)', title)
+            if not match:
+                match = re.search(r'(.+?) vs (.+?)(?::|$)', title)
+                
+            if match:
+                home_name = match.group(1).strip()
+                away_name = match.group(2).strip()
+                
+                # Clean up team names (remove "FT", "HT", etc.)
+                home_name = home_name.replace("FT", "").strip()
+                away_name = away_name.replace("FT", "").strip()
+                
+                if len(home_name) > 2 and len(away_name) > 2:
+                    home_avg = round(random.uniform(1.2, 2.5), 2)
+                    away_avg = round(random.uniform(0.8, 1.5), 2)
+                    p_home = calculate_poisson_probability(home_avg, away_avg)
                     
-                home_name = match.get('strHomeTeam')
-                away_name = match.get('strAwayTeam')
-                league_name = match.get('strLeague')
-                match_date = match.get('dateEvent')
-                
-                # We only want upcoming matches
-                if not home_name or not away_name:
-                    continue
-                
-                home_avg = round(random.uniform(1.2, 2.5), 2)
-                away_avg = round(random.uniform(0.8, 1.5), 2)
-                p_home = calculate_poisson_probability(home_avg, away_avg)
-                
-                if p_home > 0.40:
-                    simulated_odds = 2.50
-                    kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
-                    
-                    tips.append({
-                        "home": home_name, "away": away_name, "league": league_name,
-                        "odds": simulated_odds, "confidence": f"{int(p_home*100)}%",
-                        "banker": f"{home_name} Win", "stake": kelly_stake
-                    })
+                    if p_home > 0.40:
+                        simulated_odds = 2.50
+                        kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
+                        
+                        tips.append({
+                            "home": home_name, "away": away_name, "league": "BBC Sport",
+                            "odds": simulated_odds, "confidence": f"{int(p_home*100)}%",
+                            "banker": f"{home_name} Win", "stake": kelly_stake
+                        })
     except Exception as e:
-        print("TheSportsDB Failed:", str(e))
+        print("RSS Scrape Failed:", str(e))
 
     # 2. Fallback to Mock Engine if API fails
     if not tips:
