@@ -70,7 +70,13 @@ def get_tips():
         response = requests.get(url)
         data = response.json()
         
-        events = data.get('events', []) if data.get('events') else []
+        # Debug: Print the raw response to Render logs
+        print("RAW API RESPONSE:", data)
+        
+        # Safely get events, handling 'null' responses from the API
+        events = data.get('events')
+        if not events:
+            events = []
         
         # Shuffle the events so you get a different mix every time you refresh
         random.shuffle(events)
@@ -115,6 +121,7 @@ def get_tips():
         return jsonify({"date": today, "bankroll": current_balance, "tips": tips})
 
     except Exception as e:
+        print("SERVER ERROR:", str(e))
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/update', methods=['POST'])
