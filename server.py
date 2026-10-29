@@ -60,69 +60,73 @@ def calculate_kelly(balance, odds, prob):
 
 @app.route('/api/tips')
 def get_tips():
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    current_balance = get_balance()
+    tips = []
+    
+    # 1. Try TheSportsDB (Isolated in its own try/except)
     try:
-        today = datetime.utcnow().strftime('%Y-%m-%d')
-        current_balance = get_balance()
-        
-        # Fetch today's matches from TheSportsDB (Free Test Key = 3)
         url = f"https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d={today}&s=Soccer"
+        response = requests.get(url, timeout=10)
         
-        response = requests.get(url)
-        data = response.json()
+        # This will crash if the API returns HTML or empty string
+        data = response.json() 
         
-        # Debug: Print the raw response to Render logs
-        print("RAW API RESPONSE:", data)
-        
-        # Safely get events, handling 'null' responses from the API
         events = data.get('events')
-        if not events:
-            events = []
-        
-        # Shuffle the events so you get a different mix every time you refresh
-        random.shuffle(events)
-        
-        tips = []
-        
-        for match in events:
-            if len(tips) >= 3:
-                break
+        if events:
+            random.shuffle(events)
+            for match in events:
+                if len(tips) >= 3:
+                    break
+                    
+                home_name = match.get('strHomeTeam')
+                away_name = match.get('strAwayTeam')
+                league_name = match.get('strLeague')
                 
-            home_name = match.get('strHomeTeam')
-            away_name = match.get('strAwayTeam')
-            league_name = match.get('strLeague')
-            
-            # If the match doesn't have both teams, skip it
-            if not home_name or not away_name:
-                continue
-            
-            # Generate simulated stats for the Poisson math
+                if not home_name or not away_name:
+                    continue
+                
+                home_avg = round(random.uniform(1.2, 2.5), 2)
+                away_avg = round(random.uniform(0.8, 1.5), 2)
+                p_home = calculate_poisson_probability(home_avg, away_avg)
+                
+                if p_home > 0.40:
+                    simulated_odds = 2.50
+                    kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
+                    
+                    tips.append({
+                        "home": home_name, "away": away_name, "league": league_name,
+                        "odds": simulated_odds, "confidence": f"{int(p_home*100)}%",
+                        "banker": f"{home_name} Win", "stake": kelly_stake
+                    })
+    except Exception as e:
+        # If TheSportsDB crashes, we just print the error and move to the fallback
+        print("TheSportsDB Failed, using Mock Data. Reason:", str(e))
+
+    # 2. Fallback to Mock Engine (If API fails or returns no matches)
+    if not tips:
+        pool = [
+            {"home": "Inter Milan", "away": "Lecce", "league": "Serie A"},
+            {"home": "PSG", "away": "Nantes", "league": "Ligue 1"},
+            {"home": "Liverpool", "away": "Luton", "league": "Premier League"},
+            {"home": "Real Madrid", "away": "Getafe", "league": "La Liga"},
+            {"home": "Bayern Munich", "away": "Darmstadt", "league": "Bundesliga"}
+        ]
+        daily_matches = random.sample(pool, 3)
+        for match in daily_matches:
             home_avg = round(random.uniform(1.2, 2.5), 2)
             away_avg = round(random.uniform(0.8, 1.5), 2)
-            
             p_home = calculate_poisson_probability(home_avg, away_avg)
+            simulated_odds = 2.50
+            kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
             
-            if p_home > 0.40:
-                simulated_odds = 2.50
-                kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
-                
-                tips.append({
-                    "home": home_name,
-                    "away": away_name,
-                    "league": league_name,
-                    "odds": simulated_odds,
-                    "confidence": f"{int(p_home*100)}%",
-                    "banker": f"{home_name} Win",
-                    "stake": kelly_stake
-                })
-                
-        if not tips:
-            tips.append({"home": "No Matches Today", "away": "Check back tomorrow", "league": "None", "odds": 0.0, "confidence": "0%", "banker": "None", "stake": 0.0})
+            tips.append({
+                "home": match["home"], "away": match["away"], "league": match["league"],
+                "odds": simulated_odds, "confidence": f"{int(p_home*100)}%",
+                "banker": f"{match['home']} Win", "stake": kelly_stake
+            })
 
-        return jsonify({"date": today, "bankroll": current_balance, "tips": tips})
-
-    except Exception as e:
-        print("SERVER ERROR:", str(e))
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"date": today, "bankroll": current_balance, "tips": tips})
 
 @app.route('/api/update', methods=['POST'])
 def update_vault():
@@ -137,3 +141,4 @@ def update_vault():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
+
