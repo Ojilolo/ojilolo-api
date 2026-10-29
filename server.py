@@ -64,12 +64,11 @@ def get_tips():
     current_balance = get_balance()
     tips = []
     
-    # 1. Try TheSportsDB (Isolated in its own try/except)
+    # 1. Try TheSportsDB (Next 15 Premier League matches)
     try:
-        url = f"https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d={today}&s=Soccer"
+        # 4328 = English Premier League ID on TheSportsDB
+        url = "https://www.thesportsdb.com/api/v1/json/3/eventsnextleague.php?id=4328"
         response = requests.get(url, timeout=10)
-        
-        # This will crash if the API returns HTML or empty string
         data = response.json() 
         
         events = data.get('events')
@@ -82,7 +81,9 @@ def get_tips():
                 home_name = match.get('strHomeTeam')
                 away_name = match.get('strAwayTeam')
                 league_name = match.get('strLeague')
+                match_date = match.get('dateEvent')
                 
+                # We only want upcoming matches
                 if not home_name or not away_name:
                     continue
                 
@@ -100,10 +101,9 @@ def get_tips():
                         "banker": f"{home_name} Win", "stake": kelly_stake
                     })
     except Exception as e:
-        # If TheSportsDB crashes, we just print the error and move to the fallback
-        print("TheSportsDB Failed, using Mock Data. Reason:", str(e))
+        print("TheSportsDB Failed:", str(e))
 
-    # 2. Fallback to Mock Engine (If API fails or returns no matches)
+    # 2. Fallback to Mock Engine if API fails
     if not tips:
         pool = [
             {"home": "Inter Milan", "away": "Lecce", "league": "Serie A"},
@@ -141,4 +141,3 @@ def update_vault():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
-
