@@ -3,11 +3,12 @@ import requests
 import sqlite3
 import math
 import random
-import re
-import xml.etree.ElementTree as ET
 from datetime import datetime
 
 app = Flask(__name__)
+
+# PUT YOUR RAPIDAPI KEY HERE (KEEP THE QUOTES)
+API_KEY = "76d2543484msh4b47f8e7645212ap16"
 
 DB_FILE = "bankroll.db"
 
@@ -66,50 +67,45 @@ def get_tips():
     current_balance = get_balance()
     tips = []
     
-    # 1. Scrape BBC Sport RSS Feed for real upcoming matches
+    # 1. Fetch REAL matches from RapidAPI
     try:
-        rss_url = "https://feeds.bbci.co.uk/sport/football/rss.xml"
-        response = requests.get(rss_url, timeout=10)
+        url = f"https://v3.football.api-sports.io/fixtures?date={today}"
+        headers = {
+            'x-rapidapi-key': API_KEY,
+            'x-rapidapi-host': 'v3.football.api-sports.io'
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        data = response.json()
         
-        # Parse the XML
-        root = ET.fromstring(response.content)
+        if 'errors' in data and data['errors']:
+            print("API Error:", data['errors'])
+            
+        matches = data.get('response', [])
+        random.shuffle(matches)
         
-        # Loop through the news items
-        for item in root.findall('.//item'):
+        for match in matches:
             if len(tips) >= 3:
                 break
                 
-            title = item.find('title').text
+            home_name = match['teams']['home']['name']
+            away_name = match['teams']['away']['name']
+            league_name = match['league']['name']
             
-            # Look for titles like "Team A v Team B" or "Team A vs Team B"
-            match = re.search(r'(.+?) v (.+?)(?::|$)', title)
-            if not match:
-                match = re.search(r'(.+?) vs (.+?)(?::|$)', title)
+            home_avg = round(random.uniform(1.2, 2.5), 2)
+            away_avg = round(random.uniform(0.8, 1.5), 2)
+            p_home = calculate_poisson_probability(home_avg, away_avg)
+            
+            if p_home > 0.40:
+                simulated_odds = 2.50
+                kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
                 
-            if match:
-                home_name = match.group(1).strip()
-                away_name = match.group(2).strip()
-                
-                # Clean up team names (remove "FT", "HT", etc.)
-                home_name = home_name.replace("FT", "").strip()
-                away_name = away_name.replace("FT", "").strip()
-                
-                if len(home_name) > 2 and len(away_name) > 2:
-                    home_avg = round(random.uniform(1.2, 2.5), 2)
-                    away_avg = round(random.uniform(0.8, 1.5), 2)
-                    p_home = calculate_poisson_probability(home_avg, away_avg)
-                    
-                    if p_home > 0.40:
-                        simulated_odds = 2.50
-                        kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
-                        
-                        tips.append({
-                            "home": home_name, "away": away_name, "league": "BBC Sport",
-                            "odds": simulated_odds, "confidence": f"{int(p_home*100)}%",
-                            "banker": f"{home_name} Win", "stake": kelly_stake
-                        })
+                tips.append({
+                    "home": home_name, "away": away_name, "league": league_name,
+                    "odds": simulated_odds, "confidence": f"{int(p_home*100)}%",
+                    "banker": f"{home_name} Win", "stake": kelly_stake
+                })
     except Exception as e:
-        print("RSS Scrape Failed:", str(e))
+        print("RapidAPI Failed:", str(e))
 
     # 2. Fallback to Mock Engine if API fails
     if not tips:
