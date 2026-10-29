@@ -1,14 +1,10 @@
 from flask import Flask, jsonify, request
-import requests
 import sqlite3
 import math
 import random
 from datetime import datetime
 
 app = Flask(__name__)
-
-# PUT YOUR RAPIDAPI KEY HERE (KEEP THE QUOTES)
-API_KEY = "76d2543484msh4b47f8e7645212ap16"
 
 DB_FILE = "bankroll.db"
 
@@ -67,66 +63,46 @@ def get_tips():
     current_balance = get_balance()
     tips = []
     
-    # 1. Fetch REAL matches from RapidAPI
-    try:
-        url = f"https://v3.football.api-sports.io/fixtures?date={today}"
-        headers = {
-            'x-rapidapi-key': API_KEY,
-            'x-rapidapi-host': 'v3.football.api-sports.io'
-        }
-        response = requests.get(url, headers=headers, timeout=10)
-        data = response.json()
+    # The Permanent Mock Pool (No API needed)
+    pool = [
+        {"home": "Inter Milan", "away": "Lecce", "league": "Serie A"},
+        {"home": "PSG", "away": "Nantes", "league": "Ligue 1"},
+        {"home": "Liverpool", "away": "Luton", "league": "Premier League"},
+        {"home": "Real Madrid", "away": "Getafe", "league": "La Liga"},
+        {"home": "Bayern Munich", "away": "Darmstadt", "league": "Bundesliga"},
+        {"home": "Man City", "away": "Burnley", "league": "Premier League"},
+        {"home": "Barcelona", "away": "Cadiz", "league": "La Liga"},
+        {"home": "Juventus", "away": "Salernitana", "league": "Serie A"},
+        {"home": "Arsenal", "away": "Sheffield Utd", "league": "Premier League"}
+    ]
+    
+    # Pick 3 random matches for today
+    daily_matches = random.sample(pool, 3)
+    
+    for match in daily_matches:
+        # Generate dynamic math so the stakes change
+        home_avg = round(random.uniform(1.2, 2.5), 2)
+        away_avg = round(random.uniform(0.8, 1.5), 2)
+        p_home = calculate_poisson_probability(home_avg, away_avg)
         
-        if 'errors' in data and data['errors']:
-            print("API Error:", data['errors'])
-            
-        matches = data.get('response', [])
-        random.shuffle(matches)
-        
-        for match in matches:
-            if len(tips) >= 3:
-                break
-                
-            home_name = match['teams']['home']['name']
-            away_name = match['teams']['away']['name']
-            league_name = match['league']['name']
-            
-            home_avg = round(random.uniform(1.2, 2.5), 2)
-            away_avg = round(random.uniform(0.8, 1.5), 2)
-            p_home = calculate_poisson_probability(home_avg, away_avg)
-            
-            if p_home > 0.40:
-                simulated_odds = 2.50
-                kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
-                
-                tips.append({
-                    "home": home_name, "away": away_name, "league": league_name,
-                    "odds": simulated_odds, "confidence": f"{int(p_home*100)}%",
-                    "banker": f"{home_name} Win", "stake": kelly_stake
-                })
-    except Exception as e:
-        print("RapidAPI Failed:", str(e))
-
-    # 2. Fallback to Mock Engine if API fails
-    if not tips:
-        pool = [
-            {"home": "Inter Milan", "away": "Lecce", "league": "Serie A"},
-            {"home": "PSG", "away": "Nantes", "league": "Ligue 1"},
-            {"home": "Liverpool", "away": "Luton", "league": "Premier League"},
-            {"home": "Real Madrid", "away": "Getafe", "league": "La Liga"},
-            {"home": "Bayern Munich", "away": "Darmstadt", "league": "Bundesliga"}
-        ]
-        daily_matches = random.sample(pool, 3)
-        for match in daily_matches:
-            home_avg = round(random.uniform(1.2, 2.5), 2)
-            away_avg = round(random.uniform(0.8, 1.5), 2)
-            p_home = calculate_poisson_probability(home_avg, away_avg)
+        if p_home > 0.40:
             simulated_odds = 2.50
             kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
             
             tips.append({
                 "home": match["home"], "away": match["away"], "league": match["league"],
                 "odds": simulated_odds, "confidence": f"{int(p_home*100)}%",
+                "banker": f"{match['home']} Win", "stake": kelly_stake
+            })
+            
+    # If math drops below 40% for all, just force 3 picks so the app is never empty
+    if not tips:
+        for match in daily_matches:
+            p_home = 0.50
+            kelly_stake = calculate_kelly(current_balance, 2.50, p_home)
+            tips.append({
+                "home": match["home"], "away": match["away"], "league": match["league"],
+                "odds": 2.50, "confidence": "50%",
                 "banker": f"{match['home']} Win", "stake": kelly_stake
             })
 
