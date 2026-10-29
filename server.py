@@ -63,7 +63,7 @@ def get_tips():
     current_balance = get_balance()
     tips = []
     
-    # The Permanent Mock Pool (No API needed)
+    # Permanent Mock Pool (No API needed)
     pool = [
         {"home": "Inter Milan", "away": "Lecce", "league": "Serie A"},
         {"home": "PSG", "away": "Nantes", "league": "Ligue 1"},
@@ -76,11 +76,9 @@ def get_tips():
         {"home": "Arsenal", "away": "Sheffield Utd", "league": "Premier League"}
     ]
     
-    # Pick 3 random matches for today
     daily_matches = random.sample(pool, 3)
     
     for match in daily_matches:
-        # Generate dynamic math so the stakes change
         home_avg = round(random.uniform(1.2, 2.5), 2)
         away_avg = round(random.uniform(0.8, 1.5), 2)
         p_home = calculate_poisson_probability(home_avg, away_avg)
@@ -95,7 +93,6 @@ def get_tips():
                 "banker": f"{match['home']} Win", "stake": kelly_stake
             })
             
-    # If math drops below 40% for all, just force 3 picks so the app is never empty
     if not tips:
         for match in daily_matches:
             p_home = 0.50
@@ -107,6 +104,37 @@ def get_tips():
             })
 
     return jsonify({"date": today, "bankroll": current_balance, "tips": tips})
+
+@app.route('/api/manual_tips', methods=['POST'])
+def get_manual_tips():
+    try:
+        data = request.get_json()
+        matches = data.get('matches', [])
+        current_balance = get_balance()
+        tips = []
+
+        for match in matches:
+            home_name = match.get('home')
+            away_name = match.get('away')
+            league_name = match.get('league', 'Manual Entry')
+
+            home_avg = round(random.uniform(1.2, 2.5), 2)
+            away_avg = round(random.uniform(0.8, 1.5), 2)
+            p_home = calculate_poisson_probability(home_avg, away_avg)
+
+            if p_home > 0.30:
+                simulated_odds = 2.50
+                kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
+                
+                tips.append({
+                    "home": home_name, "away": away_name, "league": league_name,
+                    "odds": simulated_odds, "confidence": f"{int(p_home*100)}%",
+                    "banker": f"{home_name} Win", "stake": kelly_stake
+                })
+                
+        return jsonify({"date": datetime.utcnow().strftime('%Y-%m-%d'), "bankroll": current_balance, "tips": tips})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/update', methods=['POST'])
 def update_vault():
