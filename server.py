@@ -1,8 +1,12 @@
 from flask import Flask, jsonify, request
+import requests
 import sqlite3
 import math
 import random
+import os
+import subprocess
 from datetime import datetime
+from groq import Groq
 
 app = Flask(__name__)
 
@@ -57,52 +61,31 @@ def calculate_kelly(balance, odds, prob):
     if fraction < 0: fraction = 0 
     return round(balance * fraction, 2)
 
+# --- BETTING ROUTES ---
+
 @app.route('/api/tips')
 def get_tips():
     today = datetime.utcnow().strftime('%Y-%m-%d')
     current_balance = get_balance()
     tips = []
     
-    # Permanent Mock Pool (No API needed)
     pool = [
         {"home": "Inter Milan", "away": "Lecce", "league": "Serie A"},
         {"home": "PSG", "away": "Nantes", "league": "Ligue 1"},
         {"home": "Liverpool", "away": "Luton", "league": "Premier League"},
         {"home": "Real Madrid", "away": "Getafe", "league": "La Liga"},
-        {"home": "Bayern Munich", "away": "Darmstadt", "league": "Bundesliga"},
-        {"home": "Man City", "away": "Burnley", "league": "Premier League"},
-        {"home": "Barcelona", "away": "Cadiz", "league": "La Liga"},
-        {"home": "Juventus", "away": "Salernitana", "league": "Serie A"},
-        {"home": "Arsenal", "away": "Sheffield Utd", "league": "Premier League"}
+        {"home": "Bayern Munich", "away": "Darmstadt", "league": "Bundesliga"}
     ]
-    
     daily_matches = random.sample(pool, 3)
     
     for match in daily_matches:
-        home_avg = round(random.uniform(1.2, 2.5), 2)
-        away_avg = round(random.uniform(0.8, 1.5), 2)
-        p_home = calculate_poisson_probability(home_avg, away_avg)
-        
-        if p_home > 0.40:
-            simulated_odds = 2.50
-            kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
-            
-            tips.append({
-                "home": match["home"], "away": match["away"], "league": match["league"],
-                "odds": simulated_odds, "confidence": f"{int(p_home*100)}%",
-                "banker": f"{match['home']} Win", "stake": kelly_stake
-            })
-            
-    if not tips:
-        for match in daily_matches:
-            p_home = 0.50
-            kelly_stake = calculate_kelly(current_balance, 2.50, p_home)
-            tips.append({
-                "home": match["home"], "away": match["away"], "league": match["league"],
-                "odds": 2.50, "confidence": "50%",
-                "banker": f"{match['home']} Win", "stake": kelly_stake
-            })
-
+        p_home = calculate_poisson_probability(1.8, 1.2)
+        kelly_stake = calculate_kelly(current_balance, 2.50, p_home)
+        tips.append({
+            "home": match["home"], "away": match["away"], "league": match["league"],
+            "odds": 2.50, "confidence": f"{int(p_home*100)}%",
+            "banker": f"{match['home']} Win", "stake": kelly_stake
+        })
     return jsonify({"date": today, "bankroll": current_balance, "tips": tips})
 
 @app.route('/api/manual_tips', methods=['POST'])
@@ -118,20 +101,14 @@ def get_manual_tips():
             away_name = match.get('away')
             league_name = match.get('league', 'Manual Entry')
 
-            home_avg = round(random.uniform(1.2, 2.5), 2)
-            away_avg = round(random.uniform(0.8, 1.5), 2)
-            p_home = calculate_poisson_probability(home_avg, away_avg)
-
+            p_home = calculate_poisson_probability(random.uniform(1.2, 2.5), random.uniform(0.8, 1.5))
             if p_home > 0.30:
-                simulated_odds = 2.50
-                kelly_stake = calculate_kelly(current_balance, simulated_odds, p_home)
-                
+                kelly_stake = calculate_kelly(current_balance, 2.50, p_home)
                 tips.append({
                     "home": home_name, "away": away_name, "league": league_name,
-                    "odds": simulated_odds, "confidence": f"{int(p_home*100)}%",
+                    "odds": 2.50, "confidence": f"{int(p_home*100)}%",
                     "banker": f"{home_name} Win", "stake": kelly_stake
                 })
-                
         return jsonify({"date": datetime.utcnow().strftime('%Y-%m-%d'), "bankroll": current_balance, "tips": tips})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -142,10 +119,58 @@ def update_vault():
         data = request.get_json()
         amount = float(data.get('amount', 0))
         update_balance(amount)
-        new_balance = get_balance()
-        return jsonify({"status": "success", "new_balance": new_balance})
+        return jsonify({"status": "success", "new_balance": get_balance()})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+# --- AI AGENT ROUTE ---
+
+@app.route('/api/run_agent', methods=['POST'])
+def run_agent():
+    try:
+        data = request.get_json()
+        goal = data.get('goal', '')
+        if not goal:
+            return jsonify({"error": "No goal provided"}), 400
+
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            return jsonify({"error": "GROQ_API_KEY environment variable is missing."}), 500
+
+        client = Groq(api_key=api_key)
+        history = []
+        final_output = ""
+        
+        for i in range(2): # 2 iterations
+            prompt = f"""
+            You are an autonomous AI agent running on a Linux server.
+            Goal: {goal}
+            Write ONLY Python code to achieve the next step. No markdown formatting. Code must print results to the terminal.
+            Previous history: {history}
+            """
+            
+            response = client.chat.completions.create(
+                model="qwen/qwen3.8-27b",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2
+            )
+            generated_code = response.choices[0].message.content.strip()
+            
+            if generated_code.startswith("```python"): generated_code = generated_code[9:]
+            if generated_code.endswith("```"): generated_code = generated_code[:-3]
+            
+            with open("agent_action.py", "w") as f:
+                f.write(generated_code)
+                
+            result = subprocess.run(["python", "agent_action.py"], capture_output=True, text=True, timeout=15)
+            output = result.stdout + result.stderr
+            
+            final_output += f"--- Iteration {i+1} ---\nCode:\n{generated_code}\n\nOutput:\n{output}\n\n"
+            history.append(f"Code: {generated_code} Output: {output}")
+            
+        return jsonify({"result": final_output})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
