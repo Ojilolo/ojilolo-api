@@ -103,7 +103,6 @@ def get_manual_tips():
 
             p_home = calculate_poisson_probability(random.uniform(1.2, 2.5), random.uniform(0.8, 1.5))
             
-            # Removed the threshold filter. It will ALWAYS add the match.
             kelly_stake = calculate_kelly(current_balance, 2.50, p_home)
             tips.append({
                 "home": home_name, "away": away_name, "league": league_name,
@@ -143,17 +142,25 @@ def run_agent():
         history = []
         final_output = ""
         
-        for i in range(2): # 2 iterations
-            prompt = f"""
-            You are an autonomous AI agent running on a Linux server.
-            Goal: {goal}
-            Write ONLY Python code to achieve the next step. No markdown formatting. Code must print results to the terminal.
-            Previous history: {history}
-            """
+        system_prompt = """
+        You are an autonomous AI agent running inside Termux on an Android phone.
+        You have access to the `subprocess` module to run terminal commands.
+        If the user asks you to find or locate something (like a YouTube video), you MUST write Python code that uses the `subprocess` module to run `yt-dlp "ytsearch5:QUERY" --get-id --get-title` to find it.
+        Do not make up links. Use the tool.
+        
+        Write ONLY Python code to achieve the next step. No markdown formatting like ```python. 
+        The code must print its results to the terminal.
+        """
+
+        for i in range(3): 
+            prompt = f"Goal: {goal}\nPrevious history: {history}"
             
             response = client.chat.completions.create(
                 model="qwen/qwen3.8-27b",
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
                 temperature=0.2
             )
             generated_code = response.choices[0].message.content.strip()
@@ -164,11 +171,17 @@ def run_agent():
             with open("agent_action.py", "w") as f:
                 f.write(generated_code)
                 
-            result = subprocess.run(["python", "agent_action.py"], capture_output=True, text=True, timeout=15)
-            output = result.stdout + result.stderr
+            try:
+                result = subprocess.run(["python", "agent_action.py"], capture_output=True, text=True, timeout=30)
+                output = result.stdout + result.stderr
+            except Exception as e:
+                output = f"Execution Error: {str(e)}"
             
             final_output += f"--- Iteration {i+1} ---\nCode:\n{generated_code}\n\nOutput:\n{output}\n\n"
             history.append(f"Code: {generated_code} Output: {output}")
+            
+            if "youtube.com/watch" in output or "youtu.be" in output:
+                break
             
         return jsonify({"result": final_output})
     except Exception as e:
