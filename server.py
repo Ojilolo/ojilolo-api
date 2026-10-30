@@ -102,13 +102,15 @@ def get_manual_tips():
             league_name = match.get('league', 'Manual Entry')
 
             p_home = calculate_poisson_probability(random.uniform(1.2, 2.5), random.uniform(0.8, 1.5))
-            if p_home > 0.30:
-                kelly_stake = calculate_kelly(current_balance, 2.50, p_home)
-                tips.append({
-                    "home": home_name, "away": away_name, "league": league_name,
-                    "odds": 2.50, "confidence": f"{int(p_home*100)}%",
-                    "banker": f"{home_name} Win", "stake": kelly_stake
-                })
+            
+            # Removed the threshold filter. It will ALWAYS add the match.
+            kelly_stake = calculate_kelly(current_balance, 2.50, p_home)
+            tips.append({
+                "home": home_name, "away": away_name, "league": league_name,
+                "odds": 2.50, "confidence": f"{int(p_home*100)}%",
+                "banker": f"{home_name} Win", "stake": kelly_stake
+            })
+            
         return jsonify({"date": datetime.utcnow().strftime('%Y-%m-%d'), "bankroll": current_balance, "tips": tips})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
